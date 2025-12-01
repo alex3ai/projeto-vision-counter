@@ -1,0 +1,8 @@
+# config/data.yaml
+path: ../data/processed  # Caminho relativo ao local de execução (ou absoluto)
+train: images/train
+val: images/val
+
+# Classes
+nc: 1
+names: ['objeto']

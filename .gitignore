@@ -9,5 +9,7 @@ venv/
 data/raw/*
 data/processed/*
 !data/**/.gitkeep
-models/*.pt
+models/
+*.pt
+*.pth
 runs/
