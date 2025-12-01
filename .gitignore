@@ -8,8 +8,17 @@ venv/
 # Ignorar dados pesados e modelos treinados
 data/raw/*
 data/processed/*
+config/data_run.yaml
 !data/**/.gitkeep
 models/
 *.pt
 *.pth
 runs/
+
+# Dados Multimídia
+*.mp4
+*.avi
+*.mov
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
