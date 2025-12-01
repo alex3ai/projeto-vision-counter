@@ -1,0 +1,14 @@
+# Core Vision & DL
+torch>=2.3.1
+torchvision>=0.18.1
+opencv-python-headless
+ultralytics>=8.3.0
+
+# SAM 2 (Install from source usually recommended, but keeping simple here)
+# Para produção real, fixe o hash do commit do repositório
+git+https://github.com/facebookresearch/segment-anything-2.git
+
+# Utils
+numpy
+pyyaml
+tqdm
