@@ -1,66 +1,54 @@
 import os
-import yaml
+import sys
 from ultralytics import YOLO
 
-# --- Configurações de Caminho (SRE Approach: Absolute Paths) ---
-# Pega o diretório raiz onde o script está rodando
-BASE_DIR = os.path.abspath(os.getcwd())
-
-# Define onde estão os dados EXATAMENTE
-DATASET_DIR = os.path.join(BASE_DIR, "data", "processed")
-TEMP_YAML_PATH = os.path.join(BASE_DIR, "config", "data_run.yaml")
-
-MODEL_NAME = "yolo11n.pt"
-
-def create_dynamic_config():
-    """Gera um YAML com caminhos absolutos para evitar erros de FileNotfound."""
-    config = {
-        'path': DATASET_DIR,        # Caminho absoluto da raiz do dataset
-        'train': 'images/train',    # Relativo ao 'path' acima
-        'val': 'images/val',        # Relativo ao 'path' acima
-        'nc': 1,                    # Número de classes
-        'names': {0: 'objeto'}      # Nome das classes
-    }
+def train_model():
+    print("🚀 Iniciando Protocolo de Treinamento...")
     
-    print(f"⚙️  Gerando configuração dinâmica em: {TEMP_YAML_PATH}")
-    print(f"📂 Apontando dados para: {DATASET_DIR}")
+    # --- LÓGICA DE CAMINHOS BLINDADA ---
+    # 1. Descobre onde este script (train.py) está
+    current_script_path = os.path.abspath(__file__) # .../vision-counter/src/train.py
+    src_dir = os.path.dirname(current_script_path)  # .../vision-counter/src
+    project_root = os.path.dirname(src_dir)         # .../vision-counter
     
-    with open(TEMP_YAML_PATH, 'w') as f:
-        yaml.dump(config, f, default_flow_style=False)
+    # 2. Monta o caminho exato do data.yaml
+    yaml_path = os.path.join(project_root, "config", "data.yaml")
     
-    return TEMP_YAML_PATH
+    print(f"📂 Diretório Raiz identificado: {project_root}")
+    print(f"📄 Tentando carregar config em: {yaml_path}")
+    
+    # Verificação de segurança antes de chamar o YOLO
+    if not os.path.exists(yaml_path):
+        print(f"❌ ERRO CRÍTICO: O Python jura que o arquivo não está lá: {yaml_path}")
+        return
 
-def main():
-    print(f"🚀 Iniciando pipeline de treinamento com {MODEL_NAME}...")
+    # 3. Carrega o modelo
+    model = YOLO("yolo11n.pt")
     
-    # 1. Resolver conflito de caminhos criando config sob medida
-    data_config_path = create_dynamic_config()
-
-    # 2. Carregar Modelo
-    model = YOLO(MODEL_NAME)
-
-    # 3. Treinar
-    try:
-        results = model.train(
-            data=data_config_path,
-            epochs=50,
-            imgsz=640,
-            batch=4,
-            device="cpu",
-            project="models",
-            name="custom_counter",
-            exist_ok=True
-        )
-        print("\n✅ Treinamento concluído com sucesso!")
-        print(f"💾 Modelo salvo em: {results.save_dir}/weights/best.pt")
-        
-    except Exception as e:
-        print(f"\n❌ Erro durante o treinamento: {e}")
+    # 4. Inicia o Treino
+    results = model.train(
+    data=yaml_path,
+    epochs=70,  # Aumentar
+    batch=4,
+    augment=True,  # ATIVE ISSO
+    hsv_h=0.015,
+    hsv_s=0.7,
+    hsv_v=0.4,
+    degrees=15.0,
+    translate=0.2,
+    scale=0.5,
+    fliplr=0.5,
+    mosaic=0.0,
+    mixup=0.0,
+    lr0=0.001,        # Learning rate menor
+    warmup_epochs=5,  # Mais warmup
+    patience=20,      # Mais paciência
+    box=7.5,
+    cls=0.5
+)
     
-    finally:
-        # Limpeza (opcional): remove o yaml temporário
-        # if os.path.exists(data_config_path): os.remove(data_config_path)
-        pass
+    print("\n✅ Treinamento Finalizado!")
+    print(f"💾 Modelo salvo em: {os.path.join(project_root, 'models', 'custom_counter', 'weights', 'best.pt')}")
 
 if __name__ == "__main__":
-    main()
+    train_model()

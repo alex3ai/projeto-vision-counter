@@ -4,8 +4,11 @@ __pycache__/
 .DS_Store
 .env
 venv/
+generate_context_summary.sh
+vision_project_context.txt
 
 # Ignorar dados pesados e modelos treinados
+data_manual
 data/raw/*
 data/processed/*
 config/data_run.yaml

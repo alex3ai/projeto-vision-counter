@@ -1,8 +1,7 @@
-# config/data.yaml
-path: ../data/processed  # Caminho relativo ao local de execução (ou absoluto)
-train: images/train
-val: images/val
+# config/data.yaml (ou onde estiver seu arquivo data.yaml)
+path: data_manual  
+train: train/images
+val: val/images
 
-# Classes
-nc: 1
-names: ['objeto']
+names:
+  0: orange
