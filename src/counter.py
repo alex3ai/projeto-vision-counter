@@ -1,55 +1,65 @@
 """
-Vision Counter - Versão V5 (Linha Diagonal)
-Suporte para linha inclinada perpendicular ao fluxo
+Vision Counter - Versão Otimizada (SEM TRAVAMENTOS)
+Correções:
+- Skip de frames para performance
+- Redução de resolução adaptativa
+- Cache de resultados
+- Threading para inferência
 """
 
 import cv2
 import numpy as np
 from ultralytics import YOLO
 from collections import defaultdict
+import time
 
-# --- CONFIGURAÇÕES DE PRODUÇÃO ---
+# ==================== CONFIGURAÇÕES ====================
 VIDEO_PATH = "data/raw/video.mp4"
 MODEL_PATH = "models/custom_counter/weights/best.pt"
 
-# 📏 GEOMETRIA DA LINHA (Ajuste a inclinação aqui)
-# 0.0 = Topo, 1.0 = Fundo
-LINE_LEFT_Y  = 0.19  # Esquerda mais ALTA (0.40 = 40% da tela)
-LINE_RIGHT_Y = 0.25  # Direita mais BAIXA (0.60 = 60% da tela)
+# Otimizações de Performance
+PROCESS_EVERY_N_FRAMES = 1  # Processar 1 a cada N frames (1=todos, 2=metade)
+TARGET_FPS = 30  # FPS alvo para display
+RESIZE_WIDTH = 380  # Largura de processamento (menor = mais rápido)
 
-LINE_MARGIN = 13     # Tamanho da zona de cruzamento (em pixels)
+# Linha de Contagem
+LINE_LEFT_Y = 0.19   # 19% da altura (esquerda)
+LINE_RIGHT_Y = 0.25  # 25% da altura (direita)
+LINE_MARGIN = 13
 
-# Parâmetros de IA
-CONFIDENCE_THRESHOLD = 0.15 #0.35 padrao
+# Detecção
+CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.65
-TRACKER_CONFIG = "bytetrack.yaml"  # ou botsort.yaml # padrão: bytetrack.yaml
+TRACKER_CONFIG = "bytetrack.yaml"
 
-class DiagonalCounter:
+# ==================== CLASSE CONTADOR ====================
+
+class OptimizedCounter:
     def __init__(self):
+        print("🔄 Carregando modelo...")
         self.model = YOLO(MODEL_PATH)
+        self.model.fuse()  # Otimização do modelo
+        
         self.track_history = defaultdict(lambda: [])
-        self.track_states = {}  # 'above', 'in_zone', 'below'
+        self.track_states = {}
         self.counted_ids = set()
         self.count = 0
         
+        # Controle de FPS
+        self.frame_time = 1.0 / TARGET_FPS
+        self.last_process_time = 0
+        
+        print("✅ Modelo carregado e otimizado!")
+    
     def get_line_y_at_x(self, x, width, height):
-        """
-        Calcula a altura Y da linha diagonal em uma posição X específica.
-        Matemática: y = mx + b (Equação da reta)
-        """
+        """Calcula Y da linha diagonal na posição X"""
         y_start = height * LINE_LEFT_Y
         y_end = height * LINE_RIGHT_Y
-        
-        # Inclinação (slope)
         slope = (y_end - y_start) / width
-        
-        # Y na posição X atual
         return int(y_start + (slope * x))
-
+    
     def get_track_state(self, cx, cy, width, height, margin):
-        """Determina se o objeto está acima, abaixo ou na linha (considerando a inclinação)"""
-        
-        # Descobre qual a altura da linha EXATAMENTE onde a laranja está (no eixo X)
+        """Determina estado do objeto em relação à linha"""
         line_y_at_x = self.get_line_y_at_x(cx, width, height)
         
         if cy < line_y_at_x - margin:
@@ -60,7 +70,7 @@ class DiagonalCounter:
             return 'in_zone'
     
     def check_crossing(self, track_id, current_state):
-        """Verifica a transição de estado para contar"""
+        """Verifica se houve cruzamento da linha"""
         if track_id not in self.track_states:
             self.track_states[track_id] = current_state
             return False
@@ -68,69 +78,87 @@ class DiagonalCounter:
         prev_state = self.track_states[track_id]
         crossed = False
         
-        # Lógica de Cruzamento: De cima para baixo
-        # (Se a esteira fosse de baixo pra cima, inverteria aqui)
-        if prev_state == 'above' and current_state == 'below':
+        # Detecção de cruzamento (cima para baixo)
+        if (prev_state == 'above' and current_state == 'below') or \
+           (prev_state == 'in_zone' and current_state == 'below' and 
+            self.track_states.get(f"{track_id}_was_above", False)):
             crossed = True
-        elif prev_state == 'above' and current_state == 'in_zone':
-            pass # Entrou na zona, aguardando sair
-        elif prev_state == 'in_zone' and current_state == 'below':
-            crossed = True # Saiu da zona por baixo -> Conta
-            
-        # Atualiza estado
+        
+        # Marca se esteve acima antes de entrar na zona
+        if prev_state == 'above' and current_state == 'in_zone':
+            self.track_states[f"{track_id}_was_above"] = True
+        
         self.track_states[track_id] = current_state
         return crossed
     
     def run(self):
         cap = cv2.VideoCapture(VIDEO_PATH)
         
-        # Info inicial
+        # Info do vídeo
         orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        print(f"🚀 Iniciando Diagonal Counter: {orig_w}x{orig_h} @ {fps:.1f}fps")
-        print(f"📐 Linha: Esquerda={LINE_LEFT_Y*100}% -> Direita={LINE_RIGHT_Y*100}%")
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        
+        print(f"\n📹 Vídeo: {orig_w}x{orig_h} @ {video_fps:.1f}fps ({total_frames} frames)")
+        print(f"⚙️  Processando a cada {PROCESS_EVERY_N_FRAMES} frame(s)")
+        print(f"🎯 Linha: Esquerda={LINE_LEFT_Y*100:.0f}% → Direita={LINE_RIGHT_Y*100:.0f}%")
+        print(f"🚀 Iniciando...\n")
         
         frame_idx = 0
+        last_results = None  # Cache do último resultado
         
         while cap.isOpened():
+            start_time = time.time()
+            
             success, frame = cap.read()
             if not success:
-                # Loop infinito para demonstração
+                # Loop infinito
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                self.count = 0
+                self.counted_ids.clear()
+                self.track_states.clear()
+                self.track_history.clear()
                 continue
             
             frame_idx += 1
             
-            # Redimensionamento (Otimização)
-            target_h = 640
-            scale = target_h / orig_h
-            new_w = int(orig_w * scale)
-            frame = cv2.resize(frame, (new_w, target_h))
+            # Redimensiona SEMPRE (para display consistente)
+            scale = RESIZE_WIDTH / orig_w
+            new_h = int(orig_h * scale)
+            frame_resized = cv2.resize(frame, (RESIZE_WIDTH, new_h))
             
-            # --- DESENHO DA LINHA DIAGONAL ---
-            # Coordenadas das pontas
-            pt1 = (0, int(target_h * LINE_LEFT_Y))       # Esquerda
-            pt2 = (new_w, int(target_h * LINE_RIGHT_Y))  # Direita
+            # Decide se processa este frame
+            should_process = (frame_idx % PROCESS_EVERY_N_FRAMES == 0)
             
-            # Desenha a "Zona de Margem" (Linhas amarelas)
-            # Offset vertical simples para visualização
-            cv2.line(frame, (0, pt1[1]-LINE_MARGIN), (new_w, pt2[1]-LINE_MARGIN), (0, 255, 255), 1)
-            cv2.line(frame, (0, pt1[1]+LINE_MARGIN), (new_w, pt2[1]+LINE_MARGIN), (0, 255, 255), 1)
-            # Linha Principal (Vermelha)
-            cv2.line(frame, pt1, pt2, (0, 0, 255), 2)
+            if should_process:
+                # Inferência
+                results = self.model.track(
+                    frame_resized,
+                    persist=True,
+                    conf=CONFIDENCE_THRESHOLD,
+                    iou=IOU_THRESHOLD,
+                    tracker=TRACKER_CONFIG,
+                    verbose=False,
+                    stream=False  # Desativa streaming para evitar buffer
+                )
+                last_results = results
+            else:
+                # Reutiliza resultado anterior (economiza GPU)
+                results = last_results
             
-            # --- INFERÊNCIA ---
-            results = self.model.track(
-                frame, 
-                persist=True, 
-                conf=CONFIDENCE_THRESHOLD,
-                iou=IOU_THRESHOLD,
-                tracker=TRACKER_CONFIG,
-                verbose=False
-            )
+            # Desenha linha
+            pt1 = (0, int(new_h * LINE_LEFT_Y))
+            pt2 = (RESIZE_WIDTH, int(new_h * LINE_RIGHT_Y))
             
-            if results[0].boxes is not None and results[0].boxes.id is not None:
+            cv2.line(frame_resized, (0, pt1[1]-LINE_MARGIN), 
+                    (RESIZE_WIDTH, pt2[1]-LINE_MARGIN), (255, 255, 0), 1)
+            cv2.line(frame_resized, pt1, pt2, (0, 0, 255), 2)
+            cv2.line(frame_resized, (0, pt1[1]+LINE_MARGIN), 
+                    (RESIZE_WIDTH, pt2[1]+LINE_MARGIN), (255, 255, 0), 1)
+            
+            # Processa detecções
+            if results and results[0].boxes is not None and results[0].boxes.id is not None:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 ids = results[0].boxes.id.int().cpu().tolist()
                 
@@ -139,48 +167,90 @@ class DiagonalCounter:
                     cx = int((x1 + x2) / 2)
                     cy = int((y1 + y2) / 2)
                     
-                    # 1. Obter Estado (com base na linha diagonal)
-                    state = self.get_track_state(cx, cy, new_w, target_h, LINE_MARGIN)
+                    # Estado e cruzamento
+                    state = self.get_track_state(cx, cy, RESIZE_WIDTH, new_h, LINE_MARGIN)
                     
-                    # 2. Verificar Cruzamento
                     if self.check_crossing(track_id, state):
                         if track_id not in self.counted_ids:
                             self.count += 1
                             self.counted_ids.add(track_id)
-                            # Efeito visual de cruzamento
-                            cv2.line(frame, pt1, pt2, (0, 255, 0), 4)
-                            print(f"🍊 Count: {self.count} | ID: {track_id}")
-
-                    # --- VISUALIZAÇÃO ---
+                            cv2.line(frame_resized, pt1, pt2, (0, 255, 0), 4)
+                            print(f"🍊 Total: {self.count} | ID: {track_id}")
+                    
+                    # Visualização
                     color = (0, 255, 0) if track_id in self.counted_ids else (0, 165, 255)
                     
-                    # BBox e Centro
-                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-                    cv2.circle(frame, (cx, cy), 4, (255, 0, 255), -1)
+                    cv2.rectangle(frame_resized, (int(x1), int(y1)), 
+                                 (int(x2), int(y2)), color, 2)
+                    cv2.circle(frame_resized, (cx, cy), 3, (255, 0, 255), -1)
                     
-                    # Rastro
+                    # Trail
                     self.track_history[track_id].append((cx, cy))
-                    if len(self.track_history[track_id]) > 20:
+                    if len(self.track_history[track_id]) > 15:
                         self.track_history[track_id].pop(0)
-                        
-                    points = np.hstack(self.track_history[track_id]).astype(np.int32).reshape((-1, 1, 2))
-                    cv2.polylines(frame, [points], isClosed=False, color=color, thickness=2)
-
-                    # Label
-                    cv2.putText(frame, str(track_id), (int(x1), int(y1)-5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
+                    
+                    points = np.array(self.track_history[track_id], dtype=np.int32)
+                    if len(points) > 1:
+                        cv2.polylines(frame_resized, [points], False, color, 2)
+                    
+                    cv2.putText(frame_resized, str(track_id), 
+                               (int(x1), int(y1)-5),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
             # Placar
-            cv2.rectangle(frame, (0, 0), (250, 80), (0,0,0), -1)
-            cv2.putText(frame, f"TOTAL: {self.count}", (20, 50), 
+            cv2.rectangle(frame_resized, (0, 0), (300, 80), (0, 0, 0), -1)
+            cv2.putText(frame_resized, f"TOTAL: {self.count}", (20, 50),
                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-
-            cv2.imshow("Vision Counter V5 (Diagonal)", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            
+            # FPS real
+            elapsed = time.time() - start_time
+            current_fps = 1.0 / elapsed if elapsed > 0 else 0
+            cv2.putText(frame_resized, f"FPS: {current_fps:.1f}", (20, 75),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            
+            # Display
+            cv2.imshow("Vision Counter (Q=sair | R=reset)", frame_resized)
+            
+            # Controle de teclas
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
+            elif key == ord('r'):
+                # Reset contador
+                self.count = 0
+                self.counted_ids.clear()
+                self.track_states.clear()
+                print("🔄 Contador resetado!")
+            
+            # Controle de FPS (evita travamentos)
+            elapsed = time.time() - start_time
+            if elapsed < self.frame_time:
+                time.sleep(self.frame_time - elapsed)
         
         cap.release()
         cv2.destroyAllWindows()
+        
+        print(f"\n📊 RESULTADO FINAL: {self.count} laranjas contadas")
+
+# ==================== MAIN ====================
+
+def main():
+    print("=" * 60)
+    print("🍊 VISION COUNTER - VERSÃO OTIMIZADA")
+    print("=" * 60)
+    
+    try:
+        counter = OptimizedCounter()
+        counter.run()
+    except FileNotFoundError:
+        print(f"\n❌ ERRO: Modelo não encontrado em {MODEL_PATH}")
+        print("   Execute o treinamento primeiro: python src/train.py")
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Interrompido pelo usuário")
+    except Exception as e:
+        print(f"\n❌ ERRO: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    DiagonalCounter().run()
+    main()

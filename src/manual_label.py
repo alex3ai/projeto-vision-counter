@@ -5,7 +5,7 @@ import glob
 # Configurações
 VIDEO_PATH = "data/raw/video.mp4"
 DATASET_DIR = "data_manual"
-NUM_FRAMES_TO_LABEL = 33  # Vamos rotular apenas 10 frames
+NUM_FRAMES_TO_LABEL = 80  # Vamos rotular apenas 10 frames
 
 # Variáveis de Mouse
 drawing = False
@@ -96,7 +96,7 @@ def main():
             
             if k == 32: # SPACE
                 # Salva imagem e label
-                subset = "val" if idx >= 28 else "train"
+                subset = "val" if idx >= 70 else "train"
                 fname = f"orange_{idx:03d}.jpg"
                 
                 img_path = os.path.join(DATASET_DIR, subset, "images", fname)
