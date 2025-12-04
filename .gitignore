@@ -9,10 +9,9 @@ vision_project_context.txt
 
 # Ignorar dados pesados e modelos treinados
 data_manual
-data/raw/*
+data/raw/video.mp4
 data/processed/*
 config/data_run.yaml
-!data/**/.gitkeep
 models/
 *.pt
 *.pth
@@ -22,6 +21,5 @@ runs/
 *.mp4
 *.avi
 *.mov
-data/raw/*
 data/processed/*
 !data/raw/.gitkeep
