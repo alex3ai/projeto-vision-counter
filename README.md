@@ -2,7 +2,7 @@
 
 > Sistema de contagem de objetos em esteiras industriais usando YOLO11 + ByteTrack
 
-![Demo](data/raw/resultado_final.gif)
+![Demo](data/raw/video_counter.gif)
 
 ---
 
